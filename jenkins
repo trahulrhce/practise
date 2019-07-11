@@ -1,1 +1,64 @@
-sh 'cd ../..'
+pipeline {
+    agent none
+
+        options {
+
+        buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '6'))
+        }
+         parameters {
+             string(name: 'branchName', defaultValue: '', description: '')
+
+         }
+        triggers
+        {
+            pollSCM('* * 1 1 *')
+        }
+    stages {
+
+        stage('checkout') {
+             agent {
+        label 'DEV'
+    }
+             steps {
+                checkout([$class: 'GitSCM',
+             branches: [[name: params.branchName]],
+			 doGenerateSubmoduleConfigurations: false,
+			 extensions: [],
+			 submoduleCfg: [],
+			 userRemoteConfigs: [[url: 'ssh://git.git', credentialsId: '888']]])
+                sh 'echo from RE_UBUNTU_DEV'
+            }
+        }
+        stage ('in docker') {
+            agent {
+
+        dockerfile { dir 'pack_pp/'
+            label 'DEV'
+            args  "-v /home/sr:/home/sr -v /etc/passwd:/etc/passwd -v /bld/sr:/bld/sr"
+        }
+            }
+            steps {
+                sh 'ls -ltr'
+                dir('pack_app') {
+                    sh 'ls -ltr'
+                   sh 'npm cache clean --force'
+	                sh 'npm --proxy=http://http.proxy.com:80 install'
+	                sh 'npm run build-prod-env'
+                	sh 'npm run coverage'
+                    dir('uxebp') {
+                          sh 'gzip -rk ./app'
+                            dir('app'){
+                             sh 'rm index.html.gz'
+                              sh 'ls'
+                            }
+                    
+                    }
+	                sh 'cd ../..'
+	                sh 'zip -r build-1.0.${BUILD_NUMBER}.zip pack'
+                }
+
+	        }
+        }
+    }
+}    
+
