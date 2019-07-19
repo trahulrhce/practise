@@ -1,0 +1,82 @@
+pipeline {
+    agent none
+
+tools{
+            maven 'AUTO-MAVEN-3.3.9'
+            jdk 'AUTO-JDK1.8.0.92'
+        }
+
+        options {
+
+        buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '10'))
+        ansiColor('xterm')
+        }
+         parameters {
+             string(name: 'branchName', defaultValue: 'release', description: '')
+
+         }
+        triggers
+        {
+            pollSCM('* * 1 1 *')
+        }
+    stages {
+
+        stage('checkout') {
+             agent {
+        label 'UBUNTu'
+    }
+             steps {
+                checkout([$class: 'GitSCM',
+             branches: [[name: params.branchName]],
+			 doGenerateSubmoduleConfigurations: false,
+			 extensions: [],
+			 submoduleCfg: [],
+			 userRemoteConfigs: [[url: 'ssh://git.git', credentialsId: '787']]])
+                sh 'echo from UBUNTU'
+            }
+        }
+
+        stage('maven clean') {
+            agent {
+       label 'UBUNTU'
+   }
+                steps{
+                configFileProvider([configFile(fileId: 'bd', variable: 'MVN_SETTINGS')]) {
+                sh("""
+                mvn -f arent/pom.xml -s $MVN_SETTINGS clean compile
+                """)
+                }
+
+                }
+            }
+
+        stage ('maven test') {
+            agent {
+       label 'UBUNTU'
+   }
+                    steps{
+                    configFileProvider([configFile(fileId: 'e3c5bd', variable: 'MVN_SETTINGS')]) {
+                sh("""
+                mvn -f arent/pom.xml -s $MVN_SETTINGS test
+                """)
+                }
+
+                }
+            }
+
+        stage ('maven build') {
+            agent {
+       label 'UBUNTU'
+   }
+                    steps{
+                    configFileProvider([configFile(fileId: '5bd', variable: 'MVN_SETTINGS')]) {
+                sh("""
+                mvn -f rent/pom.xml -s $MVN_SETTINGS package -U
+                """)
+                }
+
+                }
+            }    
+        }
+}
+            
