@@ -1,12 +1,18 @@
 pipeline {
     agent none
+environment {
+
+    PACKAGEJSON_PATH = "./Client-App"
+    }
+
 
         options {
 
         buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '6'))
+        ansiColor('xterm')
         }
          parameters {
-             string(name: 'branchName', defaultValue: '', description: '')
+             string(name: 'branchName', defaultValue: 'release', description: '')
 
          }
         triggers
@@ -26,33 +32,31 @@ pipeline {
 			 extensions: [],
 			 submoduleCfg: [],
 			 userRemoteConfigs: [[url: 'ssh://git.git', credentialsId: '888']]])
-                sh 'echo from RE_UBUNTU_DEV'
+                sh 'echo from UBUNTU'
             }
         }
         stage ('in docker') {
             agent {
-
-        dockerfile { dir 'pack_pp/'
-            label 'DEV'
-            args  "-v /home/sr:/home/sr -v /etc/passwd:/etc/passwd -v /bld/sr:/bld/sr"
+        dockerfile { dir 'Client-App/'
+            label 'UBUNTU'
+            args  "-v /home/srvpwiredev:/home/srvpwiredev -v /etc/passwd:/etc/passwd -v /bld/srvpwiredev:/bld/srvpwiredev"
         }
             }
             steps {
+                configFileProvider([configFile(fileId: 'f68f', targetLocation: "${env.PACKAGEJSON_PATH}/.npmrc", variable: 'NPMRC')]) {
+                    withCredentials([usernamePassword(credentialsId: '615b', passwordVariable: 'NPM_CONFIG__AUTH', usernameVariable: 'NPM_USER')]) {
                 sh 'ls -ltr'
                 dir('pack_app') {
                     sh 'ls -ltr'
                    sh 'npm cache clean --force'
-	                sh 'npm --proxy=http://http.proxy.com:80 install'
+	                sh 'npm --proxy=http://http.proxy install'
 	                sh 'npm run build-prod-env'
                 	sh 'npm run coverage'
                     dir('uxebp') {
                           sh 'gzip -rk ./app'
                             dir('app'){
                              sh 'rm index.html.gz'
-                              sh 'ls'
-                            }
-                    
-                    }
+                              sh 'ls
 	                sh 'cd ../..'
 	                sh 'zip -r build-1.0.${BUILD_NUMBER}.zip pack'
                 }
