@@ -1,0 +1,85 @@
+
+@Library('variables') _
+ 
+JENKINS_USER = "dev"
+JENKINS_NODE_LABEL = "DEV"
+ 
+pipeline {
+    agent {
+        label "${JENKINS_NODE_LABEL}"
+    }
+    environment {
+         
+        // Source Code
+        GIT_SSH_CLONE_URL = "git"
+        GIT_BUILD_BRANCH = "develop"
+ 
+        // Build Version
+        MAJOR_MINOR_VERSION = "1.0.303"
+        BUILD_VERSION = "${env.MAJOR_MINOR_VERSION}.${env.BUILD_NUMBER}"
+ 
+        // Execute Maven compile
+        MVN_POM = "dummy/pom.xml"
+        MVN_OPTIONS = "clean install"
+        MVN_DEPLOY_JAR = "true"
+         
+        // Execute OWASP for dependency vulnerability check
+        EXECUTE_OWASP_CHECK = "false"
+        OWASP_SCAN_PATH = "dummy/target/dummy-*.jar"
+        OWASP_DATA_DIR = "/bld/dependency-check-data"
+ 
+        // Upload Artifact(s) to Artifactory Maven Repo
+        EXECUTE_ARTIFACTORY_UPLOAD = "true"
+        ARTIFACTORY_UPLOAD_PATTERN = "dummy/target/dummy-*.jar"
+        ARTIFACTORY_UPLOAD_PATH = "maven-local/" + "7654/dummy-pipeline/${env.BUILD_VERSION}/"
+ 
+        // Execute Docker build and push
+        EXECUTE_DOCKER_BUILD_PUSH = "true"
+        DOCKER_IMAGE_NAME = "mvn/dummy-pipeline"
+        DOCKER_IMAGE_TAG = "${env.BUILD_VERSION}"
+        DOCKERFILE_PATH = "dummy/"
+ 
+stage("Checkout Source Code") {
+        steps {
+            deleteDir()
+            checkout (
+                changelog: true, poll: true, 
+                scm: [
+                    $class: 'GitSCM', 
+                    branches: [[name: "${env.GIT_BUILD_BRANCH}"]], 
+                    doGenerateSubmoduleConfigurations: false, gitTool: 'Default', submoduleCfg: [], 
+                    userRemoteConfigs: [[credentialsId: "${env.GIT_CREDENTIAL_ID}", url: "${env.GIT_SSH_CLONE_URL}"]]
+                ]
+            )
+        }
+    }
+
+    stage("Maven Build") {
+        agent {
+            docker {
+                image "docker.com/maven:3.6-jdk-8"
+                args  "-v /home/${JENKINS_USER}:/home/${JENKINS_USER} -v /etc/passwd:/etc/passwd -v /bld/${JENKINS_USER}:/bld/${JENKINS_USER} --entrypoint=''"
+                reuseNode true
+            }
+        }
+        environment { 
+            MAVEN_HOME = "/usr/share/maven"
+        }
+        steps {
+            rtMavenRun (
+                pom: "${env.MVN_POM}",
+                goals: "versions:set -DnewVersion=${env.BUILD_VERSION}",
+                deployerId: "MAVEN_DEPLOYER",
+                resolverId: "MAVEN_RESOLVER"
+            )
+            rtMavenRun (
+                pom: "${env.MVN_POM}",
+                goals: "${env.MVN_OPTIONS}",
+                deployerId: "MAVEN_DEPLOYER",
+                resolverId: "MAVEN_RESOLVER"
+            )
+            rtPublishBuildInfo (
+                serverId: "artifactory"
+            )
+        }
+    }
