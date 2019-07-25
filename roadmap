@@ -1,0 +1,21 @@
+Pipeline(Scripted) stages:
+
+UI:NPM-nodejs
+
+-checkout_scm  - Platform -
+-setup Pipeline envrionment
+-install dependencies
+-Run Lint
+-Run Unit tests(new code coverage is greater than or equal to previous build or fail) - java script & (tslint), Karma code coverage
+-NPM    
+-Build 
+
+API- Maven:
+
+-checkout_scm  - Platform -
+-setup Pipeline envrionment
+-install dependencies
+-Run Unit tests(new code coverage is greater than or equal to previous build or fail) - java script & (tslint)
+-Maven build
+-Build and Push Docker image
+
