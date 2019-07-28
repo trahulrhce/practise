@@ -21,3 +21,8 @@ API- Maven:
 
 org.jacoco:jacoco-maven-plugin:prepare-agent  
 -U sonar:sonar -Pitec-sonarqube,sonar org.jacoco:jacoco-maven-plugin:report
+
+
+
+Failed to execute goal org.sonarsource.scanner.maven:sonar-maven-plugin:3.6.0.1398:sonar (default-cli) on project ebpExpWebServiceApp-POC: Could not find branches. A regular analysis is required before creating branches. -> [Help 1]
+
