@@ -19,3 +19,5 @@ API- Maven:
 -Maven build
 -Build and Push Docker image
 
+org.jacoco:jacoco-maven-plugin:prepare-agent  
+-U sonar:sonar -Pitec-sonarqube,sonar org.jacoco:jacoco-maven-plugin:report
