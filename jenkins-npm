@@ -1,68 +1,248 @@
+JENKINS_USER = "user"
+JENKINS_NODE_LABEL = "node"
+
 pipeline {
-    agent none
-environment {
-
-    PACKAGEJSON_PATH = "./Client-App"
+    agent {
+        label "${JENKINS_NODE_LABEL}"
     }
+	
+    parameters {
+         booleanParam(
+            name: 'SONAR_CODE_QUALITY',
+            defaultValue: 'YES/nNO',
+            description: 'CHECK THE BOX IF YOU WANT TO RUN SONAR CODE QUALITY ANALYSIS',
+        )
 
+        booleanParam(
+            name: 'SONAR_QUALITY_GATE',
+            defaultValue: 'YES/nNO',
+            description: 'CHECK THE BOX IF YOU WANT TO RUN SONAR_QUALITY_GATE',
+        )
 
-        options {
-
-        buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '6'))
-        ansiColor('xterm')
+        string(name: 'BRANCH_NAME', defaultValue: '', description: 'PLEASE ENTER THE GIT BRANCH NAME')
+    }
+    
+    tools{
+            jdk 'AUTO-JDK1.8.0.92'
+            nodejs 'AUTO-NODEJS-8.11.4'
         }
-         parameters {
-             string(name: 'branchName', defaultValue: 'release', description: '')
+        
+	environment {
 
-         }
-        triggers
+		EMAIL_CC_LIST = "a.com"
+
+		PACKAGEJSON_PATH = "workdir_location"
+		GIT_SSH_CLONE_URL = "git url"
+
+        // Execute Sonar for code quality and quality gate analysis
+              EXECUTE_SONAR = "true"
+              EXECUTE_SONAR_QUALITY_GATE = "true"
+              SONARQUBE_ENV_NAME = "sonar_prod_with_token"
+              SONAR_SCANNER = tool "SonarRunner2.8"
+
+		 // Upload Artifact(s) to Artifactory Maven Repo
+        EXECUTE_ARTIFACTORY_UPLOAD = "true"
+        ARTIFACTORY_UPLOAD_PATTERN = "workdir/1.0.${BUILD_NUMBER}.zip"
+        ARTIFACTORY_UPLOAD_PATH = "jfrog_path/1.0.${BUILD_NUMBER}.zip"
+
+			}
+		
+		triggers
         {
             pollSCM('* * 1 1 *')
         }
-    stages {
 
-        stage('checkout') {
-             agent {
-        label 'DEV'
-    }
-             steps {
-                checkout([$class: 'GitSCM',
-             branches: [[name: params.branchName]],
-			 doGenerateSubmoduleConfigurations: false,
-			 extensions: [],
-			 submoduleCfg: [],
-			 userRemoteConfigs: [[url: 'ssh://git.git', credentialsId: '888']]])
-                sh 'echo from UBUNTU'
+	stages {
+		stage("Setup Pipeline Env") {
+			steps {
+					// Set Client Master Default envrionment variables
+					setClientMasterDefaultVariableInEnv()
+
+                    rtServer (
+                        id: "jfrog id",
+                        url: "jfrog url",
+                        credentialsId: "${env.ARTIFACTORY_CREDENTIALS_ID}"
+                    )
+                        rtMavenResolver (
+                        id: "MAVEN_RESOLVER",
+                        serverId: "jfrog id",
+                        releaseRepo: "jfrog_path",
+                        snapshotRepo: "jfrog_path"
+                    )
+                    // Artifactory closure to capture "build-info".  This is a best practice for audit and traceability.
+                    // NOTE: "maxBuilds" and "deleteBuildArtifacts" show how artifacts can be deleted in Artifactory
+                    // fully controlled by your job.
+                    rtBuildInfo (
+                        captureEnv: true,
+                        excludeEnvPatterns: ["*private*", "internal-*"],
+                        maxBuilds: 90,
+                        maxDays: 180,
+                        // Optional - delete the build artifacts when deleting a build.
+                        deleteBuildArtifacts: true
+                    )
+				}
+			}
+
+		stage("Checkout Source Code") {
+            steps {
+                deleteDir()
+                checkout (
+                    changelog: true, poll: true,
+                    scm: [
+                        $class: 'GitSCM',
+                        branches: [[name: params.BRANCH_NAME]],
+                        doGenerateSubmoduleConfigurations: false, gitTool: 'Default', submoduleCfg: [],
+                        userRemoteConfigs: [[credentialsId: "${env.GIT_CREDENTIAL_ID}", url: "${env.GIT_SSH_CLONE_URL}"]]
+                    ]
+                )
             }
         }
-        stage ('in docker') {
-            agent {
-        dockerfile { dir 'Client-App/'
-            label 'UBUNTU'
-            args  "-v /home/srvpwiredev:/home/srvpwiredev -v /etc/passwd:/etc/passwd -v /bld/srvpwiredev:/bld/srvpwiredev"
+
+stage ('NPM Install dependencies') {
+            steps {
+                configFileProvider([configFile(fileId: 'credentialsId', targetLocation: "npm_location", variable: 'NPMRC')]) {
+                    withCredentials([usernamePassword(credentialsId: 'credentialsId', passwordVariable: 'NPM_CONFIG__AUTH', usernameVariable: 'NPM_USER')]) {
+                        sh("""
+                            cd ${env.PACKAGEJSON_PATH}
+                            npm cache clean --force
+                            npm install
+                            """)
+                            }
+                        }   
+                    }
+                }   
+                        
+stage ('NPM Code Coverage') {
+            steps {
+                configFileProvider([configFile(fileId: 'credentialsId', targetLocation: "npm_location", variable: 'NPMRC')]) {
+                    withCredentials([usernamePassword(credentialsId: 'credentialsId', passwordVariable: 'NPM_CONFIG__AUTH', usernameVariable: 'NPM_USER')]) {
+                        sh("""
+                            cd ${env.PACKAGEJSON_PATH}
+                            npm run coverage
+                            """)
+                  publishHTML target: [
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: false,
+                    keepAll: true,
+                    reportDir: 'App/coverage',
+                    reportFiles: 'index.html',
+                    reportName: 'Coverage Report'
+                ]
+            
+           }
         }
+    }
+}     
+
+stage('Sonarqube') {
+        when {
+                expression {
+                    return params.SONAR_CODE_QUALITY
+                }
             }
             steps {
-                configFileProvider([configFile(fileId: 'f68f', targetLocation: "${env.PACKAGEJSON_PATH}/.npmrc", variable: 'NPMRC')]) {
-                    withCredentials([usernamePassword(credentialsId: '615b', passwordVariable: 'NPM_CONFIG__AUTH', usernameVariable: 'NPM_USER')]) {
-                sh 'ls -ltr'
-                dir('pack_app') {
-                    sh 'ls -ltr'
-                   sh 'npm cache clean --force'
-	                sh 'npm --proxy=http://http.proxy install'
-	                sh 'npm run build-prod-env'
-                	sh 'npm run coverage'
-                    dir('uxebp') {
-                          sh 'gzip -rk ./app'
-                            dir('app'){
-                             sh 'rm index.html.gz'
-                              sh 'ls
-	                sh 'cd ../..'
-	                sh 'zip -r build-1.0.${BUILD_NUMBER}.zip pack'
-                }
+        withSonarQubeEnv(env.SONARQUBE_ENV_NAME) {
+            sh("""
+                        cd ${env.PACKAGEJSON_PATH}
+						${SONAR_SCANNER}/bin/sonar-scanner
+					""")
+       }
+                                                                                                               
+    }
+}
 
-	        }
+stage("Sonar Quality Gate") {
+            when {
+                expression {
+                    return params.SONAR_QUALITY_GATE
+                    EXECUTE_SONAR_QUALITY_GATE == "true"
+                }
+            }
+			steps {
+                timeout(time: 10, unit: 'MINUTES') {
+                    script {
+                        echo "before quality gate"
+                        def qg = waitForQualityGate()
+                        echo "after quality gate"
+                        if (qg.status != 'OK' && qg.status != 'WARN') {
+                            error "Pipeline aborted due to quality gate failure: ${qg.status}"
+                        }
+                    }
+                }
+			}
+	} 
+
+stage ('NPM Build') {
+            steps {
+                configFileProvider([configFile(fileId: 'credentialsId', targetLocation: "npm_location", variable: 'NPMRC')]) {
+                    withCredentials([usernamePassword(credentialsId: 'credentialsId', passwordVariable: 'NPM_CONFIG__AUTH', usernameVariable: 'NPM_USER')]) {
+                        sh("""
+                            cd ${env.PACKAGEJSON_PATH}
+                            npm run build
+                            cd uxebp
+                            gzip -rk ./app
+                            cd app
+                            rm index.html.gz
+                            ls
+                            cd ../..
+                            zip -r 1.0.${BUILD_NUMBER}.zip bp
+
+                        """)
+                    }
+                }
         }
     }
-}    
+	
+    stage("Upload Artifact") {
+			when {
+                expression {
+                    EXECUTE_ARTIFACTORY_UPLOAD == "true"
+                }
+			}
+            steps {
+                rtUpload (
+                    serverId: "fmr-artifactory",
+                    spec:
+                        """{
+                            "files": [
+                                {
+                                    "pattern": "${env.ARTIFACTORY_UPLOAD_PATTERN}",
+                                    "target": "${env.ARTIFACTORY_UPLOAD_PATH}"
+                                }
+                            ]
+                        }"""
+                )
+            }
+        }
 
+	}
+	
+	 post {
+        always {
+       			emailext (
+                recipientProviders: [[$class: 'RequesterRecipientProvider']],
+                subject: "Jenkins Build ${currentBuild}: Job ${env.JOB_BASE_NAME}",
+				to: "${env.EMAIL_CC_LIST}",
+                mimeType: "text/html",
+                attachLog: true, attachmentsPattern: '**/EBP-Client-App/coverage/index.html',
+                body: """<table style="border: lightgreen 3px solid; width: 600px">
+                <tr align="center"><td>
+                <table style="margin: auto; width: 80%">
+                    <tr><td>build.logFile.text.readLines().any { it =~ /.*reporter.coverage-istanbul.*/ }</td></tr>
+                    <tr><td>Status</td><td>${currentBuild.currentResult}</td></tr>
+                    <tr><td>BuildUrl</td><td><a href="${env.BUILD_URL}">${env.JOB_BASE_NAME}/${env.BUILD_NUMBER}</a></td></tr>
+                    <tr><td>JobUrl</td><td><a href="${env.JOB_URL}">${env.JOB_BASE_NAME}</a></td></tr>
+                </table>
+            </td></tr>
+            <tr align="center"><td>
+                <table style="margin: auto; width: 100%;"><tr>
+                   
+                   </tr></table>
+            </td></tr>
+        </table>"""
+            )
+        }
+    }
+
+	}
+	
